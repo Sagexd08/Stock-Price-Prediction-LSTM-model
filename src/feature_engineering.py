@@ -343,6 +343,56 @@ def reduce_dimensionality(df, n_components=0.95, exclude_cols=None):
         logger.error(f"Error reducing dimensionality: {str(e)}")
         raise
 
+def validate_data(data):
+    """Validate input data before processing."""
+    if data is None or len(data) == 0:
+        raise ValueError("Empty or None dataset provided")
+    
+    # Check for required columns
+    required_cols = ['Close']  # Add other required columns
+    missing_cols = [col for col in required_cols if col not in data.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+    
+    # Check for numeric data
+    numeric_cols = data.select_dtypes(include=['float64', 'int64']).columns
+    if len(numeric_cols) == 0:
+        raise ValueError("No numeric columns found in dataset")
+    
+    # Check for NaN values
+    nan_cols = data.columns[data.isna().any()].tolist()
+    if nan_cols:
+        logger.warning(f"Warning: NaN values found in columns: {nan_cols}")
+    
+    return data
+
+def handle_data_errors(data):
+    """Handle common data issues."""
+    try:
+        result_df = data.copy()
+        
+        # Handle string/object columns that should be numeric
+        price_columns = ['Open', 'High', 'Low', 'Close', 'Adj Close']
+        for col in price_columns:
+            if col in result_df.columns:
+                # Remove any currency symbols and commas
+                if result_df[col].dtype == 'object':
+                    result_df[col] = result_df[col].replace('[\$,]', '', regex=True)
+                    result_df[col] = pd.to_numeric(result_df[col], errors='coerce')
+        
+        # Handle percentage and volume columns
+        if 'Volume' in result_df.columns and result_df['Volume'].dtype == 'object':
+            result_df['Volume'] = result_df['Volume'].replace('[\%,]', '', regex=True)
+            result_df['Volume'] = pd.to_numeric(result_df['Volume'], errors='coerce')
+        
+        # Fill NaN values
+        result_df = result_df.fillna(method='ffill').fillna(method='bfill')
+        
+        return result_df
+    
+    except Exception as e:
+        raise ValueError(f"Error handling data conversions: {str(e)}")
+
 def prepare_features(df, target_col='Close', include_technical=True, include_statistical=True,
                     include_lags=True, normalize=True, reduce_dim=False, forecast_horizon=5):
     """
@@ -377,10 +427,29 @@ def prepare_features(df, target_col='Close', include_technical=True, include_sta
     try:
         logger.info("Preparing features for model training")
 
+        # Validate and clean input data
+        df = validate_data(df)
+        df = handle_data_errors(df)
+
         result_df = df.copy()
         transformers = {}
 
-        # Add technical indicators
+        # Ensure target column exists and is numeric
+        if target_col not in result_df.columns:
+            raise ValueError(f"Target column '{target_col}' not found in dataset")
+        try:
+            result_df[target_col] = pd.to_numeric(result_df[target_col], errors='coerce')
+            if result_df[target_col].isnull().all():
+                raise ValueError(f"Could not convert target column '{target_col}' to numeric type")
+        except Exception as e:
+            raise ValueError(f"Error converting target column: {str(e)}")
+
+        # Verify we have numeric data after conversions
+        numeric_cols = result_df.select_dtypes(include=['float64', 'int64']).columns
+        if len(numeric_cols) == 0:
+            raise ValueError("No numeric columns found after data conversion attempts")
+
+        # Continue with existing feature preparation...
         if include_technical and 'Close' in df.columns:
             result_df = add_technical_indicators(
                 result_df,
