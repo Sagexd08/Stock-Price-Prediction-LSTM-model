@@ -445,6 +445,15 @@ def download_stock_data(ticker, start_date, end_date=None, interval="1d"):
             progress_text.error(f"No data found for {ticker} in the specified date range")
             return None
 
+        # Ensure we have all required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in required_columns:
+            if col not in data.columns:
+                if col == 'Close' and 'Adj Close' in data.columns:
+                    data['Close'] = data['Adj Close']
+                else:
+                    data[col] = data['Close'] if 'Close' in data.columns else data.iloc[:, 0]
+
         # Add ticker as a column for multi-stock analysis
         data['Ticker'] = ticker
 
@@ -1013,20 +1022,25 @@ with tab_content:
             st.subheader("Data Statistics")
             st.dataframe(data.describe())
 
-            # Display correlation matrix if there are multiple columns
+            # Display correlation matrix if there are multiple numeric columns
             if len(data.columns) > 1:
                 st.subheader("Correlation Matrix")
-                corr = data.corr()
-                fig = go.Figure(data=go.Heatmap(
-                    z=corr.values,
-                    x=corr.columns,
-                    y=corr.index,
-                    colorscale='Viridis',
-                    zmin=-1,
-                    zmax=1
-                ))
-                fig.update_layout(title="Correlation Matrix")
-                st.plotly_chart(fig, use_container_width=True)
+                # Select only numeric columns for correlation
+                numeric_cols = data.select_dtypes(include=['float64', 'int64']).columns
+                if len(numeric_cols) > 1:
+                    corr = data[numeric_cols].corr()
+                    fig = go.Figure(data=go.Heatmap(
+                        z=corr.values,
+                        x=corr.columns,
+                        y=corr.index,
+                        colorscale='Viridis',
+                        zmin=-1,
+                        zmax=1
+                    ))
+                    fig.update_layout(title="Correlation Matrix")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Not enough numeric columns to create a correlation matrix.")
 
     elif active_tab == 'tab2':
         st.header("Model Training")
