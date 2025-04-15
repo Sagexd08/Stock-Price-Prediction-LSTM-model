@@ -1,0 +1,69 @@
+# Stock Price Prediction Model Configuration
+
+# Data acquisition settings
+data:
+  ticker: "AAPL"  # Default ticker symbol
+  start_date: "2018-01-01"  # Default start date
+  end_date: null  # Default end date (null means current date)
+  interval: "1d"  # Data interval (1d, 1wk, 1mo)
+  use_kaggle_data: true  # Whether to use Kaggle dataset
+  kaggle_dataset: "mrsimple07/stock-price-prediction"  # Kaggle dataset ID
+
+# Feature engineering settings
+features:
+  include_technical: true  # Whether to include technical indicators
+  include_statistical: true  # Whether to include statistical features
+  include_lags: true  # Whether to include lag features
+  normalize: true  # Whether to normalize features
+  reduce_dim: false  # Whether to reduce dimensionality
+  forecast_horizon: 5  # Number of steps ahead to forecast
+
+# Data preparation settings
+data_prep:
+  seq_length: 20  # Length of input sequences
+  val_size: 0.15  # Proportion of data to use for validation
+  test_size: 0.15  # Proportion of data to use for testing
+  batch_size: 32  # Batch size for training
+
+# Model settings
+model:
+  model_type: "lstm_attention"  # Model type (lstm, lstm_attention, stacked_lstm_attention, multi_step_lstm, bidirectional_lstm, conv_lstm, transformer)
+  hidden_dim: 64  # Hidden dimension
+  num_layers: 2  # Number of LSTM layers
+  dropout_prob: 0.2  # Dropout probability
+  output_size: 1  # Output size (1 for single-step, >1 for multi-step)
+  
+  # Additional model-specific parameters
+  conv_lstm:
+    kernel_size: 3  # Kernel size for convolutional layer
+  
+  transformer:
+    nhead: 8  # Number of attention heads
+
+# Training settings
+training:
+  learning_rate: 0.001  # Learning rate
+  weight_decay: 1e-5  # Weight decay
+  epochs: 100  # Number of epochs
+  early_stopping_patience: 10  # Number of epochs to wait for improvement before stopping
+  use_gpu: true  # Whether to use GPU if available
+  
+  # Hyperparameter optimization
+  optimize: false  # Whether to optimize hyperparameters
+  n_trials: 20  # Number of optimization trials
+  timeout: 3600  # Optimization timeout in seconds (1 hour)
+
+# Evaluation settings
+evaluation:
+  metrics: ["MSE", "RMSE", "MAE", "MAPE", "R2"]  # Metrics to calculate
+  plot_predictions: true  # Whether to plot predictions
+  plot_residuals: true  # Whether to plot residuals
+  plot_attention: true  # Whether to plot attention weights
+  monte_carlo_samples: 100  # Number of Monte Carlo samples for uncertainty quantification
+
+# Deployment settings
+deployment:
+  api_host: "0.0.0.0"  # Host for API server
+  api_port: 5000  # Port for API server
+  dashboard_port: 8501  # Port for Streamlit dashboard
+  retrain_interval_days: 7  # Interval in days between retraining
