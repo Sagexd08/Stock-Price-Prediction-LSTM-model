@@ -718,13 +718,16 @@ if __name__ == "__main__":
                 )
                 
                 # Prepare data for training
+                forecast_horizon = 5  # Align forecast horizon with feature engineering
                 train_loader, val_loader, test_loader, feature_dim = prepare_data_for_training(
                     processed_data,
-                    target_col=f'Target_5',  # Target column created by prepare_features
+                    target_col=f'Target_{forecast_horizon}',  # Target column created by prepare_features
                     seq_length=20,
-                    forecast_horizon=1,  # Single-step forecasting
+                    forecast_horizon=forecast_horizon,  # Use aligned forecast horizon
                     batch_size=32
                 )
+                # Add logging for data lengths
+                logger.info(f"Prepared data loaders with feature dimension: {feature_dim}")
                 
                 # Define model parameters
                 model_type = 'lstm_attention'
