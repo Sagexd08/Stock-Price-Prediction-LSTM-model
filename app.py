@@ -308,7 +308,8 @@ with st.sidebar.expander("📊 Data Settings", expanded=True):
         "Data Interval",
         options=list(interval_options.keys()),
         index=0,
-        help="Frequency of data points"
+        help="Frequency of data points",
+        key="sidebar_data_interval"  # Added unique key
     )
     # Display the user-friendly name
     st.caption(f"Selected: {interval_options[data_interval]}")
@@ -868,7 +869,13 @@ with tab_content:
             with col1:
                 ticker_input = st.text_input("Ticker Symbol", ticker, help="Enter the stock ticker symbol (e.g., AAPL for Apple)")
             with col2:
-                interval = st.selectbox("Data Interval", ["1d", "1wk", "1mo"], index=0, help="Frequency of data points")
+                interval = st.selectbox(
+                    "Data Interval", 
+                    ["1d", "1wk", "1mo"], 
+                    index=0, 
+                    help="Frequency of data points",
+                    key="main_data_interval"  # Added unique key
+                )
 
             if st.button("Download Data", key="download_data"):
                 with st.spinner("Downloading stock data..."):
@@ -1413,6 +1420,51 @@ with tab_content:
         elif 'predictions' not in st.session_state:
             st.warning("Please generate predictions first in the 'Predictions' tab.")
         else:
+            data = st.session_state['stock_data']
+            predictions = st.session_state.get('predictions', None)
+            model_params = st.session_state.get('model_params', {})
+            target_col = model_params.get('target_col', 'Close')
+            future_dates = predictions['Date'] if predictions is not None else None
+
+            # Rest of the performance analysis code
+            st.subheader("Stock Price Chart")
+
+            if data is not None and target_col in data.columns:
+                fig = go.Figure()
+
+                # Add historical data
+                fig.add_trace(go.Scatter(
+                    x=data.index[-30:],  # Show last 30 days
+                    y=data[target_col].tail(30),
+                    mode='lines',
+                    name='Historical',
+                    line=dict(color='blue')
+                ))
+
+                # Add prediction trace if predictions exist
+                if predictions is not None and future_dates is not None:
+                    fig.add_trace(go.Scatter(
+                        x=future_dates,
+                        y=predictions['Prediction'],
+                        mode='lines+markers',
+                        name='Prediction',
+                        line=dict(color='red', dash='dash')
+                    ))
+
+                # Update layout
+                fig.update_layout(
+                    title=f"{target_col} Stock Price Prediction",
+                    xaxis_title="Date",
+                    yaxis_title="Price",
+                    xaxis_rangeslider_visible=True,
+                    template='plotly_white',
+                    height=500
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No data available for visualization. Please ensure the data is loaded correctly.")
+
             st.subheader("Model Performance Metrics")
 
             # Create a metrics dashboard
@@ -1515,17 +1567,21 @@ with tab_content:
 
             # Add feature importance visualization
             st.subheader("Feature Importance")
-            feature_importance = pd.DataFrame({
-                'Feature': processed_data.columns,
-                'Importance': np.random.rand(len(processed_data.columns))
-            }).sort_values('Importance', ascending=False)
+            if 'processed_data' in st.session_state:
+                processed_data = st.session_state['processed_data']
+                feature_importance = pd.DataFrame({
+                    'Feature': processed_data.columns,
+                    'Importance': np.random.rand(len(processed_data.columns))
+                }).sort_values('Importance', ascending=False)
 
-            fig = px.bar(feature_importance.head(15), 
-                        x='Importance', 
-                        y='Feature', 
-                        orientation='h',
-                        title='Top 15 Most Important Features')
-            st.plotly_chart(fig, use_container_width=True)
+                fig = px.bar(feature_importance.head(15), 
+                            x='Importance', 
+                            y='Feature', 
+                            orientation='h',
+                            title='Top 15 Most Important Features')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Please train the model first to see feature importance.")
 
             # Add stock price chart display
             st.subheader("Stock Price Chart")
@@ -1563,8 +1619,24 @@ with tab_content:
             st.plotly_chart(fig, use_container_width=True)
 
             # Technical Analysis Plots
+            show_technical_indicators = st.session_state.get('show_indicators', False)
             if show_technical_indicators:
                 st.subheader("Technical Analysis")
+                
+                # Get technical indicators from session state or calculate them
+                tech_indicators = {}
+                if 'tech_indicators' in st.session_state:
+                    tech_indicators = st.session_state['tech_indicators']
+                else:
+                    # Calculate basic technical indicators
+                    tech_indicators = {
+                        'SMA_20': data[target_col].rolling(window=20).mean(),
+                        'SMA_50': data[target_col].rolling(window=50).mean(),
+                        'RSI_14': data[target_col].diff().rolling(window=14).mean(),  # Simplified RSI
+                        'MACD_12_26_9': data[target_col].ewm(span=12).mean() - data[target_col].ewm(span=26).mean(),
+                        'MACDs_12_26_9': (data[target_col].ewm(span=12).mean() - data[target_col].ewm(span=26).mean()).ewm(span=9).mean()
+                    }
+                    st.session_state['tech_indicators'] = tech_indicators
                 
                 # Create subplots
                 fig = make_subplots(rows=3, cols=1, 
