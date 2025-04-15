@@ -520,7 +520,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For questions, collaboration opportunities, or support:
 
-- Email: sohom@example.com
+- Email: sohomchatterjee07@gmail.com
 - Twitter: [@Sagexd08](https://twitter.com/Sagexd08)
 - Project Repository: [https://github.com/Sagexd08/Stock-Price-Prediction-LSTM-model](https://github.com/Sagexd08/Stock-Price-Prediction-LSTM-model)
 
