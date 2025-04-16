@@ -1,3 +1,14 @@
+# Add project root to Python path
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Import project modules
+from src.data_acquisition import download_stock_data, load_stock_data, validate_data_quality
+from src.feature_engineering import prepare_features
+from src.data_preparation import prepare_data_for_training, create_sequences, create_multistep_sequences
+from src.visualization import plot_stock_prices, plot_predictions_interactive
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,8 +16,6 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import os
-import sys
 import torch
 import datetime
 import yfinance as yf
@@ -14,13 +23,6 @@ from scipy.stats import norm
 import time
 import warnings
 warnings.filterwarnings('ignore')
-
-# Import project modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
-from data_acquisition import download_stock_data, load_stock_data, validate_data_quality
-from feature_engineering import prepare_features
-from data_preparation import prepare_data_for_training, create_sequences, create_multistep_sequences
-from visualization import plot_stock_prices, plot_predictions_interactive
 
 # Set random seed for reproducibility
 np.random.seed(42)
@@ -422,7 +424,7 @@ if st.sidebar.button("Reset All Settings"):
 
 # Enhanced functions for data handling
 
-def download_stock_data(ticker, start_date, end_date=None, interval="1d"):
+def download_stock_data(ticker, start_date, end_date=None, interval="1d", save_directly=False):
     """Download stock data from Yahoo Finance with progress tracking."""
     try:
         if end_date is None:
@@ -445,6 +447,10 @@ def download_stock_data(ticker, start_date, end_date=None, interval="1d"):
             progress_text.error(f"No data found for {ticker} in the specified date range")
             return None
 
+        # Ensure the index is DatetimeIndex
+        if not isinstance(data.index, pd.DatetimeIndex):
+            data.index = pd.to_datetime(data.index)
+
         # Ensure we have all required columns
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         for col in required_columns:
@@ -456,6 +462,43 @@ def download_stock_data(ticker, start_date, end_date=None, interval="1d"):
 
         # Add ticker as a column for multi-stock analysis
         data['Ticker'] = ticker
+
+        # Convert all numeric columns to float
+        for col in data.columns:
+            if col != 'Ticker':  # Skip the ticker column
+                try:
+                    # Check if the column is a valid Series before conversion
+                    if isinstance(data[col], (pd.Series, np.ndarray, list)):
+                        data[col] = pd.to_numeric(data[col], errors='coerce')
+                    else:
+                        # If not a valid type, create a new column with the same values
+                        st.warning(f"Column {col} is not a valid Series. Creating a new column.")
+                        values = data[col].values if hasattr(data[col], 'values') else [data[col]] * len(data)
+                        data[col] = pd.Series(values, index=data.index)
+                        data[col] = pd.to_numeric(data[col], errors='coerce')
+                except Exception as e:
+                    st.warning(f"Error converting column {col} to numeric: {str(e)}")
+                    # Try to recover by creating a new column
+                    try:
+                        data[col] = pd.Series([0] * len(data), index=data.index)
+                    except:
+                        pass
+
+        # Remove any rows with all NaN values
+        data = data.dropna(how='all')
+
+        # If save_directly is True, save the data directly to a CSV file
+        if save_directly:
+            try:
+                save_path = os.path.join('data', 'raw', 'stock_data.csv')
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+                # Create a new DataFrame with the Date as a column
+                data_to_save = data.reset_index()
+                data_to_save.to_csv(save_path, index=False)
+                st.success(f"Data saved directly to {save_path}")
+            except Exception as e:
+                st.warning(f"Could not save data directly: {str(e)}")
 
         # Clear progress message and show success
         progress_text.empty()
@@ -484,7 +527,39 @@ def load_stock_data(file_path=None):
             file_path = os.path.join('data', 'raw', 'stock_data.csv')
 
         if os.path.exists(file_path):
-            data = pd.read_csv(file_path, index_col=0, parse_dates=True)
+            # Load data
+            data = pd.read_csv(file_path)
+
+            # Check if 'Date' column exists and set it as index
+            if 'Date' in data.columns:
+                # Convert to datetime with error handling
+                try:
+                    data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+                    # Drop rows with invalid dates
+                    data = data.dropna(subset=['Date'])
+                    data.set_index('Date', inplace=True)
+                except Exception as e:
+                    st.warning(f"Error converting dates: {str(e)}. Using default index.")
+
+            # Ensure we have a 'Close' column
+            if 'Close' not in data.columns and 'Adj Close' in data.columns:
+                data['Close'] = data['Adj Close']
+
+            # Convert numeric columns to float
+            for col in data.columns:
+                if col not in ['Ticker', 'Symbol']:
+                    try:
+                        data[col] = pd.to_numeric(data[col], errors='coerce')
+                    except Exception:
+                        pass
+
+            # Handle NaN values
+            data = data.fillna(method='ffill').fillna(method='bfill')
+
+            # Final check for any remaining NaN values
+            if data.isnull().any().any():
+                st.warning("Some NaN values remain in the data after filling.")
+
             return data
         else:
             st.warning(f"File not found: {file_path}")
@@ -666,7 +741,7 @@ def generate_monte_carlo_predictions(last_price, forecast_days, num_simulations=
 
         # Generate future dates
         last_date = datetime.datetime.now()
-        future_dates = pd.date_range(start=last_date, periods=forecast_days)
+        future_dates = pd.date_range(start=last_date, periods=forecast_days, freq='D')
 
         return {
             'mean_prediction': mean_prediction,
@@ -879,9 +954,9 @@ with tab_content:
                 ticker_input = st.text_input("Ticker Symbol", ticker, help="Enter the stock ticker symbol (e.g., AAPL for Apple)")
             with col2:
                 interval = st.selectbox(
-                    "Data Interval", 
-                    ["1d", "1wk", "1mo"], 
-                    index=0, 
+                    "Data Interval",
+                    ["1d", "1wk", "1mo"],
+                    index=0,
                     help="Frequency of data points",
                     key="main_data_interval"  # Added unique key
                 )
@@ -891,56 +966,135 @@ with tab_content:
                     # Create data directory if it doesn't exist
                     os.makedirs(os.path.join('data', 'raw'), exist_ok=True)
 
-                    # Download data
+                    # Download data and save directly
                     save_path = os.path.join('data', 'raw', 'stock_data.csv')
                     data = download_stock_data(
                         ticker_input,
                         start_date.strftime('%Y-%m-%d'),
                         end_date.strftime('%Y-%m-%d'),
-                        interval=interval
+                        interval=interval,
+                        save_directly=True  # Save directly from the download function
                     )
 
                     # Save the data to a CSV file
                     if data is not None:
                         try:
-                            data.to_csv(save_path)
+                            # Ensure data types are correct before saving
+                            for col in ['Open', 'High', 'Low', 'Close', 'Adj Close']:
+                                if col in data.columns:
+                                    try:
+                                        # Check if the column is a valid Series before conversion
+                                        if isinstance(data[col], (pd.Series, np.ndarray, list)):
+                                            data[col] = pd.to_numeric(data[col], errors='coerce')
+                                        else:
+                                            # If not a valid type, create a new column with the same values
+                                            st.warning(f"Column {col} is not a valid Series. Creating a new column.")
+                                            values = data[col].values if hasattr(data[col], 'values') else [data[col]] * len(data)
+                                            data[col] = pd.Series(values, index=data.index)
+                                            data[col] = pd.to_numeric(data[col], errors='coerce')
+                                    except Exception as e:
+                                        st.warning(f"Error converting column {col} to numeric: {str(e)}")
+                                        # Try to recover by creating a new column
+                                        try:
+                                            data[col] = pd.Series([0] * len(data), index=data.index)
+                                        except:
+                                            pass
+
+                            if 'Volume' in data.columns:
+                                try:
+                                    if isinstance(data['Volume'], (pd.Series, np.ndarray, list)):
+                                        data['Volume'] = pd.to_numeric(data['Volume'], errors='coerce')
+                                    else:
+                                        values = data['Volume'].values if hasattr(data['Volume'], 'values') else [0] * len(data)
+                                        data['Volume'] = pd.Series(values, index=data.index)
+                                        data['Volume'] = pd.to_numeric(data['Volume'], errors='coerce')
+                                except Exception as e:
+                                    st.warning(f"Error converting Volume to numeric: {str(e)}")
+                                    try:
+                                        data['Volume'] = pd.Series([0] * len(data), index=data.index)
+                                    except:
+                                        pass
+
+                            # Remove any rows with all NaN values
+                            data = data.dropna(how='all')
+
+                            # Make sure the index is datetime
+                            if not isinstance(data.index, pd.DatetimeIndex):
+                                data.index = pd.to_datetime(data.index)
+
+                            # Print debug information
+                            st.write(f"Data shape: {data.shape}")
+                            st.write(f"Data columns: {data.columns.tolist()}")
+                            st.write(f"Data index type: {type(data.index)}")
+
+                            # Create a completely new DataFrame to avoid any reference issues
+                            data_dict = {}
+
+                            # Add the index as a Date column
+                            if isinstance(data.index, pd.DatetimeIndex):
+                                data_dict['Date'] = data.index.to_list()
+                            else:
+                                # If index is not DatetimeIndex, create a numeric index
+                                data_dict['Date'] = pd.date_range(start='2023-01-01', periods=len(data))
+
+                            # Add all other columns
+                            for col in data.columns:
+                                # Convert to list to ensure it's a simple type
+                                data_dict[col] = data[col].to_list()
+
+                            # Create a new DataFrame from the dictionary
+                            data_to_save = pd.DataFrame(data_dict)
+
+                            # Save to CSV using pandas' to_csv method
+                            data_to_save.to_csv(save_path, index=False)
+
+                            # If pandas to_csv fails, try a more direct approach
+                            if not os.path.exists(save_path) or os.path.getsize(save_path) == 0:
+                                st.warning("Standard saving method failed. Trying alternative method...")
+
+                                # Try a more direct approach using Python's built-in CSV module
+                                import csv
+                                with open(save_path, 'w', newline='') as csvfile:
+                                    writer = csv.writer(csvfile)
+                                    # Write header
+                                    writer.writerow(data_to_save.columns)
+                                    # Write data
+                                    for _, row in data_to_save.iterrows():
+                                        writer.writerow(row)
                             st.success(f"Data saved to {save_path}")
                         except Exception as e:
+                            import traceback
                             st.warning(f"Could not save data to file: {str(e)}")
+                            st.error(f"Error details: {traceback.format_exc()}")
 
-                    if data is not None:
-                        # Basic data validation and cleaning
-                        # Remove rows with NaN values
-                        data = data.dropna()
+                        if data is not None:
+                            # Store data in session state
+                            st.session_state['stock_data'] = data
+                            st.session_state['ticker'] = ticker_input
+                            st.success(f"Downloaded {len(data)} records for {ticker_input}")
 
-                        # Make sure the index is sorted
-                        data = data.sort_index()
-                        st.session_state['stock_data'] = data
-                        st.session_state['ticker'] = ticker_input
-                        st.success(f"Downloaded {len(data)} records for {ticker_input}")
+                            # Display data preview
+                            st.subheader("Data Preview")
+                            st.dataframe(data.head())
 
-                        # Display data preview
-                        st.subheader("Data Preview")
-                        st.dataframe(data.head())
-
-                        # Plot the data
-                        st.subheader("Stock Price Chart")
-                        fig = go.Figure()
-                        fig.add_trace(go.Candlestick(
-                            x=data.index,
-                            open=data['Open'] if 'Open' in data.columns else None,
-                            high=data['High'] if 'High' in data.columns else None,
-                            low=data['Low'] if 'Low' in data.columns else None,
-                            close=data['Close'] if 'Close' in data.columns else data.iloc[:, 0],
-                            name=ticker_input
-                        ))
-                        fig.update_layout(
-                            title=f"{ticker_input} Stock Price",
-                            xaxis_title="Date",
-                            yaxis_title="Price",
-                            xaxis_rangeslider_visible=True
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                            # Plot the data
+                            st.subheader("Stock Price Chart")
+                            fig = go.Figure()
+                            fig.add_trace(go.Candlestick(
+                                x=data.index,
+                                open=data['Open'] if 'Open' in data.columns else None,
+                                high=data['High'] if 'High' in data.columns else None,
+                                low=data['Low'] if 'Low' in data.columns else None,
+                                close=data['Close'] if 'Close' in data.columns else data.iloc[:, 0],
+                                name=ticker_input
+                            ))
+                            fig.update_layout(
+                                title=f"{ticker_input} Stock Price",
+                                xaxis_title="Date",
+                                yaxis_title="Price",
+                                xaxis_rangeslider_visible=True
+                            )
+                            st.plotly_chart(fig, use_container_width=True, key="candlestick_plot")
                     else:
                         st.error("Failed to download data")
         else:
@@ -987,7 +1141,7 @@ with tab_content:
                             yaxis_title="Price",
                             xaxis_rangeslider_visible=True
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="stock_price_plot")
                     else:
                         st.error("Failed to load data")
 
@@ -1016,7 +1170,7 @@ with tab_content:
                 hovermode="x unified"
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="stock_overview_plot")
 
             # Display data statistics
             st.subheader("Data Statistics")
@@ -1038,7 +1192,7 @@ with tab_content:
                         zmax=1
                     ))
                     fig.update_layout(title="Correlation Matrix")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="correlation_matrix")
                 else:
                     st.info("Not enough numeric columns to create a correlation matrix.")
 
@@ -1049,7 +1203,7 @@ with tab_content:
             st.warning("Please load or download stock data first in the 'Data Visualization' tab.")
         else:
             data = st.session_state['stock_data']
-            
+
             # Feature Engineering Section
             st.subheader("Feature Engineering")
 
@@ -1238,12 +1392,12 @@ with tab_content:
                             'Importance': np.random.rand(len(processed_data.columns))
                         }).sort_values('Importance', ascending=False)
 
-                        fig = px.bar(feature_importance.head(15), 
-                                   x='Importance', 
-                                   y='Feature', 
+                        fig = px.bar(feature_importance.head(15),
+                                   x='Importance',
+                                   y='Feature',
                                    orientation='h',
                                    title='Top 15 Most Important Features')
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="feature_importance_plot")
 
                         st.success("Data preparation and model training completed successfully!")
 
@@ -1307,22 +1461,27 @@ with tab_content:
                         std = np.std(last_sequence)
                         last_value = data[target_col].values[-1]
 
-                        # Generate future dates
-                        future_dates = pd.date_range(
-                            start=data.index[-1] + pd.Timedelta(days=1),
-                            periods=forecast_days
-                        )
+                        # Generate future dates for predictions
+                        if isinstance(data.index[-1], pd.Timestamp):
+                            # If the last date is a timestamp, use date range
+                            future_dates = pd.date_range(
+                                start=data.index[-1],
+                                periods=forecast_days + 1,
+                                freq='B'  # Business days to skip weekends
+                            )[1:]  # Exclude the first date as it's the last historical date
+                        else:
+                            # If not timestamp, use numeric indices
+                            last_idx = len(data.index)
+                            future_dates = range(last_idx, last_idx + forecast_days)
 
-                        # Simulate predictions with some randomness but following the trend
+                        # Simulate predictions with trend and seasonality
+                        trend = 0.001  # Slight upward trend
                         predictions = []
                         upper_bounds = []
                         lower_bounds = []
 
                         # Calculate z-score for the confidence interval
                         z_score = norm.ppf(0.5 + confidence_level / 200)
-
-                        # Generate predictions with trend and seasonality
-                        trend = 0.001  # Slight upward trend
 
                         for i in range(forecast_days):
                             # Add some randomness, trend, and seasonality
@@ -1405,7 +1564,7 @@ with tab_content:
                             legend=dict(x=0, y=1, traceorder='normal')
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="prediction_plot")
 
                         # Add model explanation
                         st.subheader("Model Explanation")
@@ -1475,7 +1634,7 @@ with tab_content:
                     height=500
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="performance_chart")
             else:
                 st.warning("No data available for visualization. Please ensure the data is loaded correctly.")
 
@@ -1553,7 +1712,7 @@ with tab_content:
                 legend=dict(x=0, y=1, traceorder='normal')
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="actual_vs_predicted")
 
             # Add error analysis
             st.subheader("Error Analysis")
@@ -1577,7 +1736,7 @@ with tab_content:
                 yaxis_title="Frequency"
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="error_distribution")
 
             # Add feature importance visualization
             st.subheader("Feature Importance")
@@ -1588,12 +1747,12 @@ with tab_content:
                     'Importance': np.random.rand(len(processed_data.columns))
                 }).sort_values('Importance', ascending=False)
 
-                fig = px.bar(feature_importance.head(15), 
-                            x='Importance', 
-                            y='Feature', 
+                fig = px.bar(feature_importance.head(15),
+                            x='Importance',
+                            y='Feature',
                             orientation='h',
                             title='Top 15 Most Important Features')
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="feature_importance_perf")
             else:
                 st.warning("Please train the model first to see feature importance.")
 
@@ -1614,7 +1773,7 @@ with tab_content:
             # Add prediction trace
             fig.add_trace(go.Scatter(
                 x=future_dates,
-                y=predictions,
+                y=predictions['Prediction'] if isinstance(predictions, pd.DataFrame) else predictions,
                 mode='lines+markers',
                 name='Prediction',
                 line=dict(color='red', dash='dash')
@@ -1630,13 +1789,13 @@ with tab_content:
                 height=500
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="stock_price_final")
 
             # Technical Analysis Plots
             show_technical_indicators = st.session_state.get('show_indicators', False)
             if show_technical_indicators:
                 st.subheader("Technical Analysis")
-                
+
                 # Get technical indicators from session state or calculate them
                 tech_indicators = {}
                 if 'tech_indicators' in st.session_state:
@@ -1651,9 +1810,9 @@ with tab_content:
                         'MACDs_12_26_9': (data[target_col].ewm(span=12).mean() - data[target_col].ewm(span=26).mean()).ewm(span=9).mean()
                     }
                     st.session_state['tech_indicators'] = tech_indicators
-                
+
                 # Create subplots
-                fig = make_subplots(rows=3, cols=1, 
+                fig = make_subplots(rows=3, cols=1,
                                   subplot_titles=('Price & Moving Averages', 'RSI', 'MACD'),
                                   vertical_spacing=0.1,
                                   row_heights=[0.5, 0.25, 0.25])
@@ -1690,7 +1849,7 @@ with tab_content:
                         name='RSI',
                         line=dict(color='purple')
                     ), row=2, col=1)
-                    
+
                     # Add RSI threshold lines
                     fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                     fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
@@ -1703,7 +1862,7 @@ with tab_content:
                         name='MACD',
                         line=dict(color='blue')
                     ), row=3, col=1)
-                    
+
                     fig.add_trace(go.Scatter(
                         x=data.index,
                         y=tech_indicators['MACDs_12_26_9'],
@@ -1720,7 +1879,7 @@ with tab_content:
                     xaxis_rangeslider_visible=False
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="technical_analysis")
 
 # Enhanced footer with more information
 st.markdown("---")

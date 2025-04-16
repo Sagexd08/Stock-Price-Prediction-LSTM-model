@@ -271,7 +271,19 @@ def normalize_features(df, method='standard', exclude_cols=None):
 
         # Fit and transform the data
         if cols_to_normalize:
-            result_df[cols_to_normalize] = scaler.fit_transform(df[cols_to_normalize].fillna(0))
+            # Check if we have any data to normalize
+            if df[cols_to_normalize].shape[0] == 0:
+                logger.error("Cannot normalize an empty dataset. Ensure your data has at least one row.")
+                raise ValueError("Empty dataset after preprocessing. Check your data filtering steps.")
+
+            # Fill NaN values before normalization
+            data_to_normalize = df[cols_to_normalize].fillna(0)
+
+            # Log data shape before normalization
+            logger.info(f"Data shape before normalization: {data_to_normalize.shape}")
+
+            # Fit and transform
+            result_df[cols_to_normalize] = scaler.fit_transform(data_to_normalize)
             logger.info(f"Normalized {len(cols_to_normalize)} features")
         else:
             logger.warning("No columns to normalize")
@@ -347,49 +359,49 @@ def validate_data(data):
     """Validate input data before processing."""
     if data is None or len(data) == 0:
         raise ValueError("Empty or None dataset provided")
-    
+
     # Check for required columns
     required_cols = ['Close']  # Add other required columns
     missing_cols = [col for col in required_cols if col not in data.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
-    
+
     # Check for numeric data
     numeric_cols = data.select_dtypes(include=['float64', 'int64']).columns
     if len(numeric_cols) == 0:
         raise ValueError("No numeric columns found in dataset")
-    
+
     # Check for NaN values
     nan_cols = data.columns[data.isna().any()].tolist()
     if nan_cols:
         logger.warning(f"Warning: NaN values found in columns: {nan_cols}")
-    
+
     return data
 
 def handle_data_errors(data):
     """Handle common data issues."""
     try:
         result_df = data.copy()
-        
+
         # Handle string/object columns that should be numeric
         price_columns = ['Open', 'High', 'Low', 'Close', 'Adj Close']
         for col in price_columns:
             if col in result_df.columns:
                 # Remove any currency symbols and commas
-                if result_df[col].dtype == 'object':
+                if pd.api.types.is_object_dtype(result_df[col]):
                     result_df[col] = result_df[col].replace('[\$,]', '', regex=True)
                     result_df[col] = pd.to_numeric(result_df[col], errors='coerce')
-        
+
         # Handle percentage and volume columns
-        if 'Volume' in result_df.columns and result_df['Volume'].dtype == 'object':
+        if 'Volume' in result_df.columns and pd.api.types.is_object_dtype(result_df['Volume']):
             result_df['Volume'] = result_df['Volume'].replace('[\%,]', '', regex=True)
             result_df['Volume'] = pd.to_numeric(result_df['Volume'], errors='coerce')
-        
+
         # Fill NaN values
         result_df = result_df.fillna(method='ffill').fillna(method='bfill')
-        
+
         return result_df
-    
+
     except Exception as e:
         raise ValueError(f"Error handling data conversions: {str(e)}")
 
@@ -426,72 +438,91 @@ def prepare_features(df, target_col='Close', include_technical=True, include_sta
     """
     try:
         logger.info("Preparing features for model training")
-
-        # Validate and clean input data
-        df = validate_data(df)
-        df = handle_data_errors(df)
-
+        
+        # Make a copy of the input data
         result_df = df.copy()
         transformers = {}
 
-        # Ensure target column exists and is numeric
+        # Ensure target column exists
         if target_col not in result_df.columns:
             raise ValueError(f"Target column '{target_col}' not found in dataset")
-        try:
-            result_df[target_col] = pd.to_numeric(result_df[target_col], errors='coerce')
-            if result_df[target_col].isnull().all():
-                raise ValueError(f"Could not convert target column '{target_col}' to numeric type")
-        except Exception as e:
-            raise ValueError(f"Error converting target column: {str(e)}")
 
-        # Verify we have numeric data after conversions
-        numeric_cols = result_df.select_dtypes(include=['float64', 'int64']).columns
-        if len(numeric_cols) == 0:
-            raise ValueError("No numeric columns found after data conversion attempts")
+        # Clean and validate data
+        for col in result_df.columns:
+            if pd.api.types.is_object_dtype(result_df[col]):
+                # Try to convert object columns to numeric
+                result_df[col] = pd.to_numeric(result_df[col], errors='coerce')
 
-        # Continue with existing feature preparation...
-        if include_technical and 'Close' in df.columns:
-            result_df = add_technical_indicators(
-                result_df,
-                close_col='Close',
-                high_col='High' if 'High' in df.columns else None,
-                low_col='Low' if 'Low' in df.columns else None,
-                volume_col='Volume' if 'Volume' in df.columns else None,
-                include_all=True
-            )
+        # Handle NaN values in target column
+        target_nulls = result_df[target_col].isnull().sum() > 0
+        if target_nulls:
+            logger.warning(f"Found NaN values in target column {target_col}. Filling with forward/backward fill.")
+            result_df[target_col] = result_df[target_col].fillna(method='ffill').fillna(method='bfill')
 
-        # Add statistical features
-        if include_statistical and target_col in df.columns:
-            result_df = add_statistical_features(result_df, price_col=target_col)
+        # Drop rows where target column is still NaN
+        result_df = result_df.dropna(subset=[target_col])
 
-        # Add lag features
+        if len(result_df) == 0:
+            raise ValueError("No valid data remains after cleaning target column")
+
+        # Fill NaN values in other columns
+        result_df = result_df.fillna(method='ffill')
+        result_df = result_df.fillna(method='bfill')
+        result_df = result_df.fillna(0)  # Fill any remaining NaN with 0
+
+        # Add technical indicators if requested
+        if include_technical:
+            try:
+                result_df = add_technical_indicators(result_df)
+                logger.info(f"Added technical indicators. New shape: {result_df.shape}")
+            except Exception as e:
+                logger.warning(f"Error adding technical indicators: {str(e)}. Continuing without them.")
+
+        # Add statistical features if requested
+        if include_statistical:
+            try:
+                result_df = add_statistical_features(result_df, price_col=target_col)
+                logger.info(f"Added statistical features. New shape: {result_df.shape}")
+            except Exception as e:
+                logger.warning(f"Error adding statistical features: {str(e)}. Continuing without them.")
+
+        # Add lag features if requested
         if include_lags:
-            cols_to_lag = [target_col]
-            if 'Volume' in df.columns:
-                cols_to_lag.append('Volume')
-            result_df = add_lag_features(result_df, cols_to_lag)
+            try:
+                cols_to_lag = [target_col]
+                if 'Volume' in result_df.columns:
+                    cols_to_lag.append('Volume')
+                result_df = add_lag_features(result_df, cols_to_lag)
+                logger.info(f"Added lag features. New shape: {result_df.shape}")
+            except Exception as e:
+                logger.warning(f"Error adding lag features: {str(e)}. Continuing without them.")
 
-        # Create target variable (future price)
-        result_df[f'Target_{forecast_horizon}'] = df[target_col].shift(-forecast_horizon)
+        # Create target variable
+        result_df[f'Target_{forecast_horizon}'] = result_df[target_col].shift(-forecast_horizon)
 
-        # Drop rows with NaN values
-        result_df = result_df.dropna()
+        # Drop rows with NaN in target
+        result_df = result_df.dropna(subset=[f'Target_{forecast_horizon}'])
 
-        # Normalize features
-        if normalize:
-            # Exclude the target from normalization
-            exclude_from_norm = [f'Target_{forecast_horizon}']
-            result_df, scaler = normalize_features(result_df, exclude_cols=exclude_from_norm)
-            transformers['scaler'] = scaler
+        # Normalize features if requested
+        if normalize and len(result_df) > 0:
+            try:
+                result_df, scaler = normalize_features(result_df, exclude_cols=[f'Target_{forecast_horizon}'])
+                transformers['scaler'] = scaler
+                logger.info("Features normalized")
+            except Exception as e:
+                logger.warning(f"Error normalizing features: {str(e)}. Continuing without normalization.")
 
-        # Reduce dimensionality
-        if reduce_dim:
-            # Exclude the target from PCA
-            exclude_from_pca = [f'Target_{forecast_horizon}']
-            result_df, pca = reduce_dimensionality(result_df, exclude_cols=exclude_from_pca)
-            transformers['pca'] = pca
+        # Reduce dimensionality if requested
+        if reduce_dim and len(result_df.columns) > 10:
+            try:
+                exclude_cols = [f'Target_{forecast_horizon}']
+                result_df, pca = reduce_dimensionality(result_df, exclude_cols=exclude_cols)
+                transformers['pca'] = pca
+                logger.info("Dimensionality reduction completed successfully")
+            except Exception as e:
+                logger.warning(f"Error reducing dimensionality: {str(e)}. Continuing without dimension reduction.")
 
-        logger.info(f"Feature preparation complete. Final dataframe has {result_df.shape[1]} features")
+        logger.info(f"Feature preparation complete. Final dataframe shape: {result_df.shape}")
         return result_df, transformers
 
     except Exception as e:

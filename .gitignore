@@ -1,5 +1,3 @@
-.qodo
-
 # Python
 __pycache__/
 *.py[cod]
@@ -22,36 +20,31 @@ wheels/
 .installed.cfg
 *.egg
 
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# VS Code
-.vscode/
-
-# Environment
-.env
-.venv
-env/
-venv/
-ENV/
-
-# Data files
+# Project specific
 data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
-
-# Model files
 models/*
 !models/.gitkeep
-
-# Logs
 logs/*
 !logs/.gitkeep
+*.log
 
-# Results
-results/*
-!results/.gitkeep
-
-# Other
+# OS specific
 .DS_Store
+Thumbs.db
