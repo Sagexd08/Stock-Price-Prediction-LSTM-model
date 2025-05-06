@@ -1,6 +1,7 @@
 version: '3'
 
 services:
+  # Basic Streamlit app
   streamlit:
     build:
       context: .
@@ -8,8 +9,28 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      - .:/app
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./results:/app/results
+      - ./logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
+      - APP_FILE=app.py
     restart: unless-stopped
-    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+
+  # Enhanced Streamlit app with advanced features
+  enhanced:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8502:8501"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./results:/app/results
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - APP_FILE=enhanced_app.py
+    restart: unless-stopped

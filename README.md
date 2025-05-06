@@ -65,7 +65,8 @@ An advanced stock price prediction system leveraging LSTM (Long Short-Term Memor
 stock-price-prediction/
 ├── data/                      # Data directory
 │   ├── raw/                   # Raw data downloaded from sources
-│   └── processed/             # Cleaned and feature-engineered datasets
+│   ├── processed/             # Cleaned and feature-engineered datasets
+│   └── portfolios/            # User portfolio data
 ├── models/                    # Saved model checkpoints and configurations
 │   ├── architecture/          # Model architecture definitions
 │   ├── checkpoints/           # Trained model weights
@@ -99,14 +100,14 @@ stock-price-prediction/
 │   ├── figures/               # Visualization outputs
 │   ├── metrics/               # Performance metrics
 │   └── predictions/           # Model predictions
-├── docs/                      # Documentation
-│   ├── api/                   # API documentation
-│   ├── architecture/          # System architecture docs
-│   └── user_guide/            # User guides and tutorials
+├── logs/                      # Log files
 ├── app.py                     # Interactive Streamlit application
+├── enhanced_app.py            # Enhanced Streamlit application with advanced features
 ├── config.yaml                # Configuration file
 ├── main.py                    # Main entry point
 ├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Docker configuration for containerization
+├── docker-compose.yml         # Docker Compose configuration
 ├── run.bat                    # Windows execution script
 ├── run.sh                     # Unix execution script
 └── README.md                  # This file
@@ -173,9 +174,17 @@ pip install -r requirements-extra.txt
 # Build the Docker image
 docker build -t stock-prediction .
 
-# Run the container
+# Run the container with the basic app
 docker run -p 8501:8501 stock-prediction
+
+# Run the container with the enhanced app
+docker run -p 8501:8501 -e APP_FILE=enhanced_app.py stock-prediction
+
+# Using Docker Compose
+docker-compose up
 ```
+
+The Dockerfile is configured to run either the basic or enhanced Streamlit app based on your preference.
 
 ---
 
@@ -184,13 +193,29 @@ docker run -p 8501:8501 stock-prediction
 ### Running the Web Interface
 
 ```bash
-# Start the Streamlit app
+# Start the basic Streamlit app
 python app.py
 # OR
 streamlit run app.py
+
+# Start the enhanced Streamlit app with advanced features
+python enhanced_app.py
+# OR
+streamlit run enhanced_app.py
 ```
 
 Then navigate to `http://localhost:8501` in your browser.
+
+### Enhanced Streamlit App Features
+
+The enhanced Streamlit app (`enhanced_app.py`) includes several advanced features:
+
+- **Advanced Visualization**: Interactive charts with Plotly, technical indicator overlays, and customizable themes
+- **Portfolio Management**: Track and analyze your stock portfolio with performance metrics
+- **Monte Carlo Simulations**: Generate price predictions with confidence intervals using Monte Carlo methods
+- **Technical Analysis**: Comprehensive technical indicator analysis with visual explanations
+- **Customizable Parameters**: Fine-tune model parameters directly from the UI
+- **Responsive Design**: Optimized for both desktop and mobile viewing
 
 ### Command Line Usage
 
@@ -405,6 +430,7 @@ The project includes automated hyperparameter tuning using:
 - **Web Application**: Streamlit, Dash
 - **Batch Processing**: Airflow, Cron
 - **Cloud Deployment**: AWS SageMaker, Google AI Platform, Azure ML
+- **Local Deployment**: Docker containerization for easy local deployment
 
 ---
 
@@ -485,19 +511,19 @@ We follow PEP 8 guidelines with docstrings in Google format. Run `flake8` before
 
 ## ❓ FAQ
 
-**Q: Can this model be used for day trading?**  
+**Q: Can this model be used for day trading?**
 A: While the model provides accurate predictions, it's designed primarily for medium to long-term forecasting. Day trading would require additional customization and higher-frequency data.
 
-**Q: How often should I retrain the model?**  
+**Q: How often should I retrain the model?**
 A: For optimal performance, retrain the model monthly or when market conditions change significantly.
 
-**Q: Do I need a powerful GPU?**  
+**Q: Do I need a powerful GPU?**
 A: For experimentation and small datasets, a CPU is sufficient. For training on large datasets or multiple stocks, a GPU will significantly speed up the process.
 
-**Q: How accurate are the predictions?**  
+**Q: How accurate are the predictions?**
 A: The model achieves directional accuracy up to 65% on validation data, but performance varies by stock and market conditions. Always use predictions as one of many inputs in your investment decisions.
 
-**Q: Is this suitable for professional use?**  
+**Q: Is this suitable for professional use?**
 A: The system incorporates research-grade techniques, but always perform thorough validation before using in professional investment contexts.
 
 ---
